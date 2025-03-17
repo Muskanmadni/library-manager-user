@@ -1,165 +1,151 @@
-import json
+import sqlite3
+import streamlit as st
 
 class BookCollection:
-    """This class represents a collection of books.Allow to add, remove, search and list books."""
-
     def __init__(self):
-        """initialize the collection of books.a list of books."""
-        self.book_list  = []
-        self.storage_file = "books_data.json"
-        self.read_from_file()
-    
-    def read_from_file(self):
-        """read the books from the json file.If the file doesn't exist or is corrupted, start with an empty collection."""
-        try:
-            with open(self.storage_file, 'r') as file:
-                self.book_list = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.book_list = []
+        """Initialize SQLite database connection and create the books table."""
+        self.connection = sqlite3.connect("books.db")  # Local database file
+        self.cursor = self.connection.cursor()
+        self.create_table()
 
-            
+    def create_table(self):
+        """Create a table if it doesn't exist."""
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS books (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                year TEXT NOT NULL,
+                genre TEXT NOT NULL,
+                read_status BOOLEAN NOT NULL DEFAULT 0
+            )
+        """)
+        self.connection.commit()
 
-    def save_to_file(self):
-        """Store the current book collection to a JSON file for permanent storage."""
-        with open(self.storage_file, "w") as file:
-            json.dump(self.book_list, file, indent=4)
+    def create_new_book(self, book_title, book_author, publication_year, book_genre, is_book_read):
+        """Add a new book to the SQLite database."""
+        self.cursor.execute("""
+            INSERT INTO books (title, author, year, genre, read_status)
+            VALUES (?, ?, ?, ?, ?)
+        """, (book_title, book_author, publication_year, book_genre, is_book_read))
+        self.connection.commit()
+        st.success("Book added successfully!")
 
-    def create_new_book(self):
-        """Add a new book to the collection by gathering information from the user."""
-        book_title = input("Enter book title: ")
-        book_author = input("Enter author: ")
-        publication_year = input("Enter publication year: ")
-        book_genre = input("Enter genre: ")
-        is_book_read = (
-            input("Have you read this book? (yes/no): ").strip().lower() == "yes"
-        )
-
-        new_book = {
-            "title": book_title,
-            "author": book_author,
-            "year": publication_year,
-            "genre": book_genre,
-            "read": is_book_read,
-        }
-
-        self.book_list.append(new_book)
-        self.save_to_file()
-        print("Book added successfully!\n")
-
-    def delete_book(self):
-        """Remove a book from the collection using its title."""
-        book_title = input("Enter the title of the book to remove: ")
-
-        for book in self.book_list:
-            if book["title"].lower() == book_title.lower():
-                self.book_list.remove(book)
-                self.save_to_file()
-                print("Book removed successfully!\n")
-                return
-        print("Book not found!\n")
-
-    def find_book(self):
-        """Search for books in the collection by title or author name."""
-        search_type = input("Search by:\n1. Title\n2. Author\nEnter your choice: ")
-        search_text = input("Enter search term: ").lower()
-        found_books = [
-            book
-            for book in self.book_list
-            if search_text in book["title"].lower()
-            or search_text in book["author"].lower()
-        ]
-
-        if found_books:
-            print("Matching Books:")
-            for index, book in enumerate(found_books, 1):
-                reading_status = "Read" if book["read"] else "Unread"
-                print(
-                    f"{index}. {book['title']} by {book['author']} ({book['year']}) - {book['genre']} - {reading_status}"
-                )
+    def delete_book(self, book_title):
+        """Remove a book from the database using its title."""
+        self.cursor.execute("DELETE FROM books WHERE title = ?", (book_title,))
+        self.connection.commit()
+        if self.cursor.rowcount:
+            st.success("Book removed successfully!")
         else:
-            print("No matching books found.\n")
+            st.error("Book not found!")
 
-    def update_book(self):
-        """Modify the details of an existing book in the collection."""
-        book_title = input("Enter the title of the book you want to edit: ")
-        for book in self.book_list:
-            if book["title"].lower() == book_title.lower():
-                print("Leave blank to keep existing value.")
-                book["title"] = input(f"New title ({book['title']}): ") or book["title"]
-                book["author"] = (
-                    input(f"New author ({book['author']}): ") or book["author"]
-                )
-                book["year"] = input(f"New year ({book['year']}): ") or book["year"]
-                book["genre"] = input(f"New genre ({book['genre']}): ") or book["genre"]
-                book["read"] = (
-                    input("Have you read this book? (yes/no): ").strip().lower()
-                    == "yes"
-                )
-                self.save_to_file()
-                print("Book updated successfully!\n")
-                return
-        print("Book not found!\n")
+    def find_book(self, search_text):
+        """Search for books by title or author."""
+        self.cursor.execute("SELECT * FROM books WHERE title LIKE ? OR author LIKE ?",
+                            (f"%{search_text}%", f"%{search_text}%"))
+        found_books = self.cursor.fetchall()
+        return found_books
+
+    def update_book(self, book_id, new_title, new_author, new_year, new_genre, new_read):
+        """Modify the details of an existing book in the database."""
+        self.cursor.execute("""
+            UPDATE books SET title = ?, author = ?, year = ?, genre = ?, read_status = ?
+            WHERE id = ?
+        """, (new_title, new_author, new_year, new_genre, new_read, book_id))
+        self.connection.commit()
+        st.success("Book updated successfully!")
 
     def show_all_books(self):
-        """Display all books in the collection with their details."""
-        if not self.book_list:
-            print("Your collection is empty.\n")
-            return
-
-        print("Your Book Collection:")
-        for index, book in enumerate(self.book_list, 1):
-            reading_status = "Read" if book["read"] else "Unread"
-            print(
-                f"{index}. {book['title']} by {book['author']} ({book['year']}) - {book['genre']} - {reading_status}"
-            )
-        print()
+        """Display all books stored in the SQLite database."""
+        self.cursor.execute("SELECT * FROM books")
+        books = self.cursor.fetchall()
+        return books
 
     def show_reading_progress(self):
-        """Calculate and display statistics about your reading progress."""
-        total_books = len(self.book_list)
-        completed_books = sum(1 for book in self.book_list if book["read"])
-        completion_rate = (
-            (completed_books / total_books * 100) if total_books > 0 else 0
-        )
-        print(f"Total books in collection: {total_books}")
-        print(f"Reading progress: {completion_rate:.2f}%\n")
+        """Calculate and display statistics about reading progress."""
+        self.cursor.execute("SELECT COUNT(*) FROM books")
+        total_books = self.cursor.fetchone()[0]
 
-    def start_application(self):
-        """Run the main application loop with a user-friendly menu interface."""
-        while True:
-            print("📚 Welcome to Your Book Collection Manager! 📚")
-            print("1. Add a new book")
-            print("2. Remove a book")
-            print("3. Search for books")
-            print("4. Update book details")
-            print("5. View all books")
-            print("6. View reading progress")
-            print("7. Exit")
-            user_choice = input("Please choose an option (1-7): ")
+        self.cursor.execute("SELECT COUNT(*) FROM books WHERE read_status = 1")
+        completed_books = self.cursor.fetchone()[0]
 
-            if user_choice == "1":
-                self.create_new_book()
-            elif user_choice == "2":
-                self.delete_book()
-            elif user_choice == "3":
-                self.find_book()
-            elif user_choice == "4":
-                self.update_book()
-            elif user_choice == "5":
-                self.show_all_books()
-            elif user_choice == "6":
-                self.show_reading_progress()
-            elif user_choice == "7":
-                self.save_to_file()
-                print("Thank you for using Book Collection Manager. Goodbye!")
-                break
+        completion_rate = (completed_books / total_books * 100) if total_books > 0 else 0
+        return total_books, completion_rate
+
+    def __del__(self):
+        """Close database connection when the object is deleted."""
+        self.connection.close()
+
+# Streamlit application
+def main():
+    st.title("📚 Book Collection Manager 📚")
+
+    book_manager = BookCollection()
+
+    menu = ["Add a new book", "Remove a book", "Search for books", "Update book details", "View all books", "View reading progress"]
+    choice = st.sidebar.selectbox("Menu", menu)
+
+    if choice == "Add a new book":
+        st.subheader("Add a new book")
+        book_title = st.text_input("Enter book title")
+        book_author = st.text_input("Enter author")
+        publication_year = st.text_input("Enter publication year")
+        book_genre = st.text_input("Enter genre")
+        is_book_read = st.radio("Have you read this book?", ("Yes", "No")) == "Yes"
+        if st.button("Add Book"):
+            book_manager.create_new_book(book_title, book_author, publication_year, book_genre, is_book_read)
+
+    elif choice == "Remove a book":
+        st.subheader("Remove a book")
+        book_title = st.text_input("Enter the title of the book to remove")
+        if st.button("Remove Book"):
+            book_manager.delete_book(book_title)
+
+    elif choice == "Search for books":
+        st.subheader("Search for books")
+        search_text = st.text_input("Enter search term")
+        if st.button("Search"):
+            found_books = book_manager.find_book(search_text)
+            if found_books:
+                for book in found_books:
+                    reading_status = "Read" if book[5] else "Unread"
+                    st.write(f"{book[1]} by {book[2]} ({book[3]}) - {book[4]} - {reading_status}")
             else:
-                print("Invalid choice. Please try again.\n")
+                st.write("No matching books found.")
 
+    elif choice == "Update book details":
+        st.subheader("Update book details")
+        book_title = st.text_input("Enter the title of the book you want to edit")
+        if st.button("Find Book"):
+            book_manager.cursor.execute("SELECT * FROM books WHERE title = ?", (book_title,))
+            book = book_manager.cursor.fetchone()
+            if book:
+                new_title = st.text_input("New title", book[1])
+                new_author = st.text_input("New author", book[2])
+                new_year = st.text_input("New year", book[3])
+                new_genre = st.text_input("New genre", book[4])
+                new_read = st.radio("Have you read this book?", ("Yes", "No")) == "Yes"
+                if st.button("Update Book"):
+                    book_manager.update_book(book[0], new_title, new_author, new_year, new_genre, new_read)
+            else:
+                st.write("Book not found.")
+
+    elif choice == "View all books":
+        st.subheader("View all books")
+        books = book_manager.show_all_books()
+        if books:
+            for book in books:
+                reading_status = "Read" if book[5] else "Unread"
+                st.write(f"{book[1]} by {book[2]} ({book[3]}) - {book[4]} - {reading_status}")
+        else:
+            st.write("Your collection is empty.")
+
+    elif choice == "View reading progress":
+        st.subheader("View reading progress")
+        total_books, completion_rate = book_manager.show_reading_progress()
+        st.write(f"Total books in collection: {total_books}")
+        st.write(f"Reading progress: {completion_rate:.2f}%")
 
 if __name__ == "__main__":
-    book_manager = BookCollection()
-    book_manager.start_application()
-
-
-
+    main()
